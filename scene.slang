@@ -51,6 +51,12 @@ struct Scene {
     SamplerState linear_sampler;
     float3 sun_direction;
     
+    // Shadow Map Resources
+    Texture2D<float> shadow_map;
+    float4x4 light_view_proj;
+    float shadow_map_size;
+    bool use_shadow_map;
+
     DirectionalLight directional_light;
 
     Camera camera;
@@ -367,6 +373,20 @@ struct Scene {
         return sky_luminance;
     }
     
+    // Visibility test using Shadow Map
+    float get_visibility_shadow_map(float3 world_pos)
+    {
+        float4 clip_pos = mul(light_view_proj, float4(world_pos, 1.0));
+        float3 ndc = clip_pos.xyz / clip_pos.w;
+
+        if (any(abs(ndc.xy) > 1.0) || ndc.z < 0.0 || ndc.z > 1.0) return 1.0;
+        float2 uv = ndc.xy * 0.5 + 0.5;
+        float closest_depth = shadow_map.SampleLevel(linear_sampler, uv, 0);
+        float current_depth = ndc.z;
+        float bias = 0.001; 
+        return (current_depth - bias < closest_depth) ? 1.0 : 0.0;
+    }
+
     // Sample sky with sun disk (atmospheric scattering + sun disk)
     // Used only for primary rays that miss all geometry
     float3 sample_sky_with_sun_disk(float3 rayDir)
@@ -389,9 +409,14 @@ struct Scene {
         float3 L_dir = sample_result.xyz;
         float pdf = sample_result.w;
         
-        // Visibility test
-        Ray shadow_ray = Ray(sd.compute_new_ray_origin(), L_dir);
-        float visibility = get_visibility(shadow_ray);
+        // Visibility test - toggle between shadow map and ray tracing
+        float visibility;
+        if (use_shadow_map) {
+            visibility = get_visibility_shadow_map(sd.position);
+        } else {
+            Ray shadow_ray = Ray(sd.compute_new_ray_origin(), L_dir);
+            visibility = get_visibility(shadow_ray);
+        }
         
         // Lambertian BRDF evaluation
         float NdotL = max(0.0, dot(sd.shading_frame.n, L_dir));

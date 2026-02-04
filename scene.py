@@ -268,6 +268,9 @@ class Scene:
         # Frame index for stochastic alpha
         self._frame_index: int = 0
         
+        # Shadow map toggle (controlled by renderer)
+        self.use_shadow_map: bool = False
+        
         # Start async location fetch
         # SunPosition.get_current_location_async(self._on_location_received)
         
@@ -719,9 +722,9 @@ class Scene:
     def _update_sun_from_hours(self, hours: float):
         """Update sun direction based on hours slider value."""
         now = datetime.now()
-        hour = int(hours)
-        minute = int((hours - hour) * 60)
-        second = int(((hours - hour) * 60 - minute) * 60)
+        hour = int(hours) % 24  # Wrap 24 -> 0
+        minute = int((hours - int(hours)) * 60)
+        second = int(((hours - int(hours)) * 60 - minute) * 60)
         
         sun_data = SunPosition.calculate(
             latitude=self._latitude,
@@ -787,6 +790,14 @@ class Scene:
         cursor["sky_view_lut"] = self.sky_view_lut_gen.get_texture()
         cursor["linear_sampler"] = self.linear_sampler
         cursor["sun_direction"] = self._sun_direction
+        
+        # Bind Shadow Map Resources
+        if self.shadow_map is not None:
+            cursor["shadow_map"] = self.shadow_map
+        cursor["light_view_proj"] = self.light_view_proj
+        cursor["shadow_map_size"] = self.shadow_map_size
+        cursor["use_shadow_map"] = self.use_shadow_map
+
         cursor["instance_count"] = len(self.instance_descs)
         cursor["frame_index"] = self._frame_index
         

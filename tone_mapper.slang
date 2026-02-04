@@ -14,10 +14,15 @@ float3 aces_film(float3 x)
 struct ToneMapper {
     Texture2D<float4> input;
     RWTexture2D<float4> output;
+    float exposure;
 
     void execute(uint2 pixel)
     {
         float3 i = input[pixel].xyz;
+        
+        // Apply exposure before tone mapping
+        i *= pow(2.0, exposure);
+        
         float3 o = aces_film(i);
         output[pixel] = float4(o, 1.0);
     }
