@@ -7,6 +7,7 @@ from accumulator import Accumulator
 from path_tracer import PathTracer
 from shadow_map import ShadowMapPass
 from render_data import RenderData
+from debug_visualizer import DebugVisualizer
 
 class PathTracingRenderer:
     def initialize(self, device: spy.Device, scene: Scene):
@@ -16,6 +17,7 @@ class PathTracingRenderer:
         self.accumulator: Accumulator = Accumulator(device, resource_key="path_tracing_renderer.accumulator_history")
         self.tone_mapper: ToneMapper = ToneMapper(device)
         self.shadow_map_pass: ShadowMapPass = ShadowMapPass(device)
+        self.debug_visualizer: DebugVisualizer = DebugVisualizer(device)
         self.exposure_slider = None
 
         self.render_texture: spy.Texture | None = None
@@ -26,6 +28,9 @@ class PathTracingRenderer:
         self.reset_accumulator = True
         self.use_accum_check_box: spy.ui.CheckBox | None = None
         self.use_shadow_map_check_box: spy.ui.CheckBox | None = None
+        self.debug_frustum_check_box: spy.ui.CheckBox | None = None
+        self.frustum_radius_slider: spy.ui.SliderFloat | None = None
+        self.frustum_distance_slider: spy.ui.SliderFloat | None = None
 
     def on_camera_move(self, data):
         self.reset_accumulator = True
@@ -61,6 +66,10 @@ class PathTracingRenderer:
         # Update shadow map usage flag and execute if enabled
         use_shadow_map = self._get_use_shadow_map()
         self.scene.use_shadow_map = use_shadow_map
+        
+        # Update frustum config from UI sliders
+        self._update_frustum_config()
+        
         if use_shadow_map:
             self.shadow_map_pass.execute(command_encoder, self.scene, self.scene.sun_direction)
 
@@ -80,6 +89,20 @@ class PathTracingRenderer:
             output,
         )
 
+        # Debug visualization for light frustum
+        if self._get_debug_frustum():
+            frustum = self.debug_visualizer.get_frustum_from_shadow_pass(
+                self.shadow_map_pass,
+                self.scene.sun_direction
+            )
+            self.debug_visualizer.execute(
+                command_encoder,
+                output,
+                frustum,
+                self.scene.camera.position,
+                self.scene.camera.inv_view_proj_matrix
+            )
+
         self.reset_accumulator = False
 
     def _get_use_accum(self) -> bool:
@@ -93,6 +116,22 @@ class PathTracingRenderer:
         if self.use_shadow_map_check_box is None:
             return True
         return self.use_shadow_map_check_box.value
+
+    def _get_debug_frustum(self) -> bool:
+        """Get debug_frustum value from UI checkbox."""
+        if self.debug_frustum_check_box is None:
+            return False
+        return self.debug_frustum_check_box.value
+
+    def _update_frustum_config(self):
+        """Update shadow map frustum config from UI sliders."""
+        cfg = self.shadow_map_pass.frustum_config
+        
+        if self.frustum_radius_slider is not None:
+            cfg.radius = self.frustum_radius_slider.value
+        
+        if self.frustum_distance_slider is not None:
+            cfg.distance = self.frustum_distance_slider.value
 
     @property
     def exposure(self) -> float:
@@ -109,3 +148,13 @@ class PathTracingRenderer:
         self.exposure_slider = spy.ui.SliderFloat(ui_window, 'Exposure', min=-5.0, max=5.0, value=0.0)
         self.use_accum_check_box = spy.ui.CheckBox(ui_window, 'Use Accum')
         self.use_shadow_map_check_box = spy.ui.CheckBox(ui_window, 'Use Shadow Map')
+        self.debug_frustum_check_box = spy.ui.CheckBox(ui_window, 'Debug Light Frustum')
+        
+        # Frustum configuration sliders
+        cfg = self.shadow_map_pass.frustum_config
+        self.frustum_radius_slider = spy.ui.SliderFloat(
+            ui_window, 'Frustum Radius', min=1.0, max=5.0, value=cfg.radius
+        )
+        self.frustum_distance_slider = spy.ui.SliderFloat(
+            ui_window, 'Frustum Distance', min=10.0, max=100.0, value=cfg.distance
+        )
