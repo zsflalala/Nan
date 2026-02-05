@@ -270,6 +270,9 @@ class Scene:
         
         # Shadow map toggle (controlled by renderer)
         self.use_shadow_map: bool = False
+        self.shadow_map: spy.Texture | None = None
+        self.light_view_proj: spy.float4x4 = spy.float4x4.identity()
+        self.shadow_map_size: float = 2048.0
         
         # Start async location fetch
         # SunPosition.get_current_location_async(self._on_location_received)

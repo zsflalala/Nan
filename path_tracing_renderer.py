@@ -15,7 +15,7 @@ class PathTracingRenderer:
         self.path_tracer: PathTracer = PathTracer(device, scene)
         self.accumulator: Accumulator = Accumulator(device, resource_key="path_tracing_renderer.accumulator_history")
         self.tone_mapper: ToneMapper = ToneMapper(device)
-        self.shadow_map_pass: ShadowMapPass = ShadowMapPass(device, scene)
+        self.shadow_map_pass: ShadowMapPass = ShadowMapPass(device)
         self.exposure_slider = None
 
         self.render_texture: spy.Texture | None = None
@@ -62,7 +62,7 @@ class PathTracingRenderer:
         use_shadow_map = self._get_use_shadow_map()
         self.scene.use_shadow_map = use_shadow_map
         if use_shadow_map:
-            self.shadow_map_pass.execute(command_encoder)
+            self.shadow_map_pass.execute(command_encoder, self.scene, self.scene.sun_direction)
 
         self.path_tracer.execute(command_encoder, render_texture, frame)
         self.accumulator.execute(
