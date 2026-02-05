@@ -26,6 +26,7 @@ class DebugVisualizer:
     Currently supports:
     - Orthographic frustum visualization (box wireframe)
     - Light direction indicator
+    - Shadow map texture preview
     """
     
     # Box edges: pairs of corner indices (0-7)
@@ -49,9 +50,17 @@ class DebugVisualizer:
         self.line_color = spy.float3(1.0, 0.8, 0.0)  # Yellow
         self.line_thickness = 2.0  # Pixels
         
-        # Load shader
+        # Shadow map preview settings
+        self.preview_size = 256  # Preview window size in pixels
+        self.preview_margin = 20  # Margin from bottom-right corner
+        
+        # Load wireframe shader
         self.program = device.load_program("debug_visualizer.slang", ["compute_main"])
         self.pipeline = device.create_compute_pipeline(self.program)
+        
+        # Load shadow map preview shader
+        self.preview_program = device.load_program("debug_visualizer.slang", ["shadow_map_preview_main"])
+        self.preview_pipeline = device.create_compute_pipeline(self.preview_program)
         
         # Create buffer for edge data (12 edges * 2 endpoints * 3 floats)
         self.edge_buffer = device.create_buffer(
@@ -198,3 +207,37 @@ class DebugVisualizer:
             g.image_height = output.height
             
             pass_encoder.dispatch(thread_count=[output.width, output.height, 1])
+
+    def draw_shadow_map_preview(
+        self,
+        command_encoder: spy.CommandEncoder,
+        output: spy.Texture,
+        shadow_map: spy.Texture
+    ):
+        """
+        Draw shadow map texture as a preview in the corner of the screen.
+        
+        Args:
+            command_encoder: Command encoder for GPU commands
+            output: Output texture to draw on
+            shadow_map: Shadow map texture to preview
+        """
+        # Calculate preview position (bottom-right corner)
+        preview_x = output.width - self.preview_size - self.preview_margin
+        preview_y = output.height - self.preview_size - self.preview_margin
+        
+        # Execute preview shader
+        with command_encoder.begin_compute_pass() as pass_encoder:
+            shader_object = pass_encoder.bind_pipeline(self.preview_pipeline)
+            cursor = spy.ShaderCursor(shader_object)
+            
+            g = cursor.g_preview
+            g.output = output
+            g.shadow_map = shadow_map
+            g.preview_x = preview_x
+            g.preview_y = preview_y
+            g.preview_size = self.preview_size
+            g.image_width = output.width
+            g.image_height = output.height
+            
+            pass_encoder.dispatch(thread_count=[self.preview_size, self.preview_size, 1])

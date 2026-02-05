@@ -1,6 +1,5 @@
 /**
  * Debug Visualizer Shader
- * 
  * Renders wireframe overlays for debug visualization.
  * Uses ray-line distance testing to draw edges on screen.
  */
@@ -23,6 +22,20 @@ struct DebugParams
 };
 
 ParameterBlock<DebugParams> g_debug;
+
+// Shadow map preview parameters
+struct PreviewParams
+{
+    RWTexture2D<float4> output;
+    Texture2D<float> shadow_map;
+    uint preview_x;
+    uint preview_y;
+    uint preview_size;
+    uint image_width;
+    uint image_height;
+};
+
+ParameterBlock<PreviewParams> g_preview;
 
 /**
  * Compute the minimum distance from a ray to a line segment.
@@ -174,4 +187,55 @@ void compute_main(uint3 dispatch_id: SV_DispatchThreadID)
         float3 blended = lerp(current_color.rgb, g_debug.line_color, alpha);
         g_debug.output[pixel] = float4(blended, current_color.a);
     }
+}
+
+/**
+ * Shadow Map Preview Shader
+ * Renders the shadow map texture as a preview in the corner of the screen.
+ */
+[shader("compute")]
+[numthreads(8, 8, 1)]
+void shadow_map_preview_main(uint3 dispatch_id: SV_DispatchThreadID)
+{
+    uint2 local_pixel = dispatch_id.xy;
+    
+    if (local_pixel.x >= g_preview.preview_size || local_pixel.y >= g_preview.preview_size)
+        return;
+    
+    // Calculate screen pixel position
+    uint2 screen_pixel = uint2(
+        g_preview.preview_x + local_pixel.x,
+        g_preview.preview_y + local_pixel.y
+    );
+    
+    // Bounds check
+    if (screen_pixel.x >= g_preview.image_width || screen_pixel.y >= g_preview.image_height)
+        return;
+    
+    // Sample shadow map using UV coordinates
+    float2 uv = float2(local_pixel) / float2(g_preview.preview_size);
+    
+    // Get shadow map dimensions
+    uint2 shadow_map_size;
+    g_preview.shadow_map.GetDimensions(shadow_map_size.x, shadow_map_size.y);
+    
+    // Sample shadow map
+    uint2 shadow_pixel = uint2(uv * float2(shadow_map_size));
+    float depth = g_preview.shadow_map[shadow_pixel];
+    
+    // Visualize depth as grayscale (normalize to visible range)
+    float normalized_depth = saturate(depth);  // Assuming depth is already in [0, 1]
+    float3 color = float3(normalized_depth, normalized_depth, normalized_depth);
+    
+    // Draw border
+    bool is_border = local_pixel.x == 0 || local_pixel.y == 0 || 
+                     local_pixel.x == g_preview.preview_size - 1 || 
+                     local_pixel.y == g_preview.preview_size - 1;
+    
+    if (is_border)
+    {
+        color = float3(1.0, 0.8, 0.0);  // Yellow border
+    }
+    
+    g_preview.output[screen_pixel] = float4(color, 1.0);
 }

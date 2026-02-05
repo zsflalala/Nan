@@ -14,8 +14,8 @@ class OrthoFrustumConfig:
         distance: 虚拟光源相机到中心点的距离 (单位: 米)
     """
     center: Optional[spy.float3] = None
-    radius: float = 20.0
-    distance: float = 100.0
+    radius: float = 2.5
+    distance: float = 10.0
     
     @property
     def near(self) -> float:
