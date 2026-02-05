@@ -20,21 +20,6 @@ class FrustumData:
 
 
 class DebugVisualizer:
-    """
-    Debug visualization class for rendering wireframe overlays.
-    
-    Currently supports:
-    - Orthographic frustum visualization (box wireframe)
-    - Light direction indicator
-    - Shadow map texture preview
-    """
-    
-    # Box edges: pairs of corner indices (0-7)
-    # Box corner layout (in light view space, before transform to world):
-    #   Near plane (z=near):    Far plane (z=far):
-    #     2---3                   6---7
-    #     |   |                   |   |
-    #     0---1                   4---5
     BOX_EDGES = [
         # Near face edges
         (0, 1), (1, 3), (3, 2), (2, 0),

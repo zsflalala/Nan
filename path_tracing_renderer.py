@@ -169,7 +169,7 @@ class PathTracingRenderer:
         self.use_accum_check_box = spy.ui.CheckBox(ui_window, 'Use Accum')
         self.use_shadow_map_check_box = spy.ui.CheckBox(ui_window, 'Use Shadow Map')
         
-        # [DEBUG] 创建独立的调试 UI 窗口，发布时可删除
+        # [DEBUG]
         self._setup_debug_ui(ui_context)
 
     def _setup_debug_ui(self, ui_context: spy.ui.Context):
@@ -189,7 +189,7 @@ class PathTracingRenderer:
         # Frustum configuration sliders
         cfg = self.shadow_map_pass.frustum_config
         self.frustum_radius_slider = spy.ui.SliderFloat(
-            self.debug_ui_window, 'Frustum Radius', min=1.0, max=5.0, value=cfg.radius
+            self.debug_ui_window, 'Frustum Radius', min=1.0, max=20.0, value=cfg.radius
         )
         self.frustum_distance_slider = spy.ui.SliderFloat(
             self.debug_ui_window, 'Frustum Distance', min=10.0, max=40.0, value=cfg.distance

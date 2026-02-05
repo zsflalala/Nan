@@ -694,3 +694,136 @@ class SceneNode:
 
         return scene_node
 
+    @classmethod
+    def random_objects_scene(cls, seed: int = None):
+        """Create a scene with a 50x50 ground plane and 9 random floating objects.
+        
+        Objects are randomly placed between 1-8m above the ground.
+        Object types: sphere, capsule, cube, box (rectangular).
+        Colors are randomly assigned.
+        
+        Args:
+            seed: Random seed for reproducibility (optional)
+        """
+        import random
+        
+        if seed is not None:
+            random.seed(seed)
+            np.random.seed(seed)
+        
+        scene_node = cls()
+        
+        # Camera setup - elevated view of the scene
+        scene_node.camera.target = spy.float3(0, 5, 0)
+        scene_node.camera.position = spy.float3(35, 25, 35)
+        scene_node.camera.fov = 60.0
+        
+        # Create ground plane (50x50)
+        ground_mesh = scene_node.add_mesh(Mesh.create_quad([50, 50]))
+        ground_mat = scene_node.add_material(Material(
+            base_color=spy.float3(0.4, 0.4, 0.4),
+            roughness=0.8
+        ))
+        ground_transform = Transform()
+        ground_transform.translation = spy.float3(0, 0, 0)
+        ground_transform.update_matrix()
+        ground_tid = scene_node.add_transform(ground_transform)
+        scene_node.add_instance(ground_mesh, ground_mat, ground_tid)
+        
+        # Pre-create mesh templates for each object type
+        sphere_mesh = scene_node.add_mesh(Mesh.create_sphere(radius=1.0, segments=32, rings=16))
+        capsule_mesh = scene_node.add_mesh(Mesh.create_capsule(radius=0.5, height=1.0, segments=24, rings=8))
+        cube_mesh = scene_node.add_mesh(Mesh.create_cube(spy.float3(1, 1, 1)))
+        
+        object_types = ['sphere', 'capsule', 'cube', 'box']
+        
+        # Create 9 random objects
+        for i in range(9):
+            # Random color (bright, saturated colors)
+            hue = random.random()
+            saturation = 0.7 + random.random() * 0.3
+            value = 0.7 + random.random() * 0.3
+            
+            # HSV to RGB conversion
+            h_i = int(hue * 6)
+            f = hue * 6 - h_i
+            p = value * (1 - saturation)
+            q = value * (1 - f * saturation)
+            t = value * (1 - (1 - f) * saturation)
+            
+            if h_i == 0:
+                r, g, b = value, t, p
+            elif h_i == 1:
+                r, g, b = q, value, p
+            elif h_i == 2:
+                r, g, b = p, value, t
+            elif h_i == 3:
+                r, g, b = p, q, value
+            elif h_i == 4:
+                r, g, b = t, p, value
+            else:
+                r, g, b = value, p, q
+            
+            color = spy.float3(r, g, b)
+            roughness = 0.2 + random.random() * 0.6
+            metallic = random.random() * 0.5
+            
+            mat = scene_node.add_material(Material(
+                base_color=color,
+                roughness=roughness,
+                metallic=metallic
+            ))
+            
+            # Random position (within 50x50 plane, leaving some margin)
+            x = random.uniform(-20, 20)
+            z = random.uniform(-20, 20)
+            y = random.uniform(1, 8)  # 1-8m above ground
+            
+            # Random object type
+            obj_type = random.choice(object_types)
+            
+            # Random scale (1-3x)
+            scale_factor = random.uniform(1.0, 3.0)
+            
+            transform = Transform()
+            transform.translation = spy.float3(x, y, z)
+            
+            # Random rotation
+            transform.rotation = spy.float3(
+                random.uniform(0, 360),
+                random.uniform(0, 360),
+                random.uniform(0, 360)
+            )
+            
+            if obj_type == 'sphere':
+                transform.scale = spy.float3(scale_factor, scale_factor, scale_factor)
+                transform.update_matrix()
+                tid = scene_node.add_transform(transform)
+                scene_node.add_instance(sphere_mesh, mat, tid)
+                
+            elif obj_type == 'capsule':
+                # Capsule has different height scaling
+                height_scale = scale_factor * random.uniform(1.0, 2.0)
+                transform.scale = spy.float3(scale_factor, height_scale, scale_factor)
+                transform.update_matrix()
+                tid = scene_node.add_transform(transform)
+                scene_node.add_instance(capsule_mesh, mat, tid)
+                
+            elif obj_type == 'cube':
+                transform.scale = spy.float3(scale_factor, scale_factor, scale_factor)
+                transform.update_matrix()
+                tid = scene_node.add_transform(transform)
+                scene_node.add_instance(cube_mesh, mat, tid)
+                
+            else:  # box (rectangular)
+                # Random rectangular dimensions
+                sx = scale_factor * random.uniform(0.5, 1.5)
+                sy = scale_factor * random.uniform(0.5, 2.0)
+                sz = scale_factor * random.uniform(0.5, 1.5)
+                transform.scale = spy.float3(sx, sy, sz)
+                transform.update_matrix()
+                tid = scene_node.add_transform(transform)
+                scene_node.add_instance(cube_mesh, mat, tid)
+        
+        return scene_node
+

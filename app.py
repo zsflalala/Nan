@@ -16,6 +16,7 @@ from scene import Scene
 from scene_node import SceneNode
 from renderer import Renderer
 from render_data import RenderData
+from scene_config import SceneConfig, SceneType
 # install pip package event-dispatching https://pypi.org/project/event-dispatching/
 import event_dispatcher 
 
@@ -33,6 +34,7 @@ class AppConfig:
     srgb_output: bool = True
     camera_move_test: bool = False
     scene_path: str | None = None
+    show_scene_selector: bool = True  # 启动时是否显示场景选择器
 
 class App:
     def __init__(self, config: Optional[AppConfig] = None):
@@ -76,12 +78,22 @@ class App:
         self.output_texture: spy.Texture | None = None  # type: ignore (will be set immediately)
         self.render_data: RenderData = RenderData(self.device)
 
-        if self.window is not None:
-            self.window.on_keyboard_event = self.on_keyboard_event
-            self.window.on_mouse_event = self.on_mouse_event
-            self.window.on_resize = self.on_resize
+        # Initialize ui and renderer early
+        self.ui: Context | None = spy.ui.Context(self.device) if not self.headless else None
+        self.renderer: Renderer | None = None
 
-        self.scene_node: SceneNode = self._load_scene(self.config.scene_path)
+        # Scene selection: show selector UI if enabled and no path specified
+        self.selected_scene_config: Optional[SceneConfig] = None
+        if not self.headless and self.config.show_scene_selector and self.config.scene_path is None:
+            from scene_selector import SceneSelector
+            selector = SceneSelector(self.device, self.window, self.surface)
+            self.selected_scene_config = selector.run_selection_loop()
+            if self.window.should_close():
+                # User closed window during selection
+                import sys
+                sys.exit(0)
+        
+        self.scene_node: SceneNode = self._load_scene(self.config.scene_path, self.selected_scene_config)
 
         self.event_dispatcher: SyncEventDispatcher = event_dispatcher.SyncEventDispatcher()
         self.scene: Scene = Scene(self.device, self.scene_node, self.event_dispatcher)
@@ -89,8 +101,11 @@ class App:
         self.camera_controller: CameraController = CameraController(self.scene_node.camera)
         self.camera_controller.move_test = self.config.camera_move_test
 
-        self.ui: Context | None = spy.ui.Context(self.device) if not self.headless else None
-        self.renderer: Renderer | None = None
+        # Bind window event handlers AFTER camera_controller is initialized
+        if self.window is not None:
+            self.window.on_keyboard_event = self.on_keyboard_event
+            self.window.on_mouse_event = self.on_mouse_event
+            self.window.on_resize = self.on_resize
 
         self.render_doc_is_available = (
             spy.renderdoc.is_available() and not self.headless
@@ -99,10 +114,21 @@ class App:
             print("RenderDoc Avaliable")
         self.should_capture = False
 
-    def _load_scene(self, scene_path: Optional[str]) -> SceneNode:
-        """Load scene from path, choosing loader based on file extension."""
+    def _load_scene(self, scene_path: Optional[str], scene_config: Optional[SceneConfig] = None) -> SceneNode:
+        """Load scene from path or SceneConfig."""
+        # If SceneConfig provided, use it
+        if scene_config is not None:
+            if scene_config.scene_type == SceneType.DEMO:
+                return SceneNode.demo()
+            elif scene_config.scene_type == SceneType.RANDOM_OBJECTS:
+                return SceneNode.random_objects_scene()
+            elif scene_config.path is not None:
+                return SceneNode.load_asset(str(scene_config.path), scale=scene_config.scale)
+            else:
+                return SceneNode.demo()
+        
+        # Fall back to path-based loading
         if scene_path is None:
-            # Default scene: Cornell box
             return SceneNode.demo()
         
         path = Path(scene_path)

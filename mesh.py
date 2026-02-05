@@ -187,3 +187,156 @@ class Mesh:
 
         return Mesh(vertices, indices)
 
+    @classmethod
+    def create_sphere(cls, radius: float = 0.5, segments: int = 32, rings: int = 16):
+        """Create a UV sphere mesh.
+        
+        Args:
+            radius: Sphere radius
+            segments: Number of segments around the sphere (longitude)
+            rings: Number of rings from pole to pole (latitude)
+        """
+        vertices_list = []
+        indices_list = []
+        
+        for ring in range(rings + 1):
+            phi = np.pi * ring / rings  # 0 to pi
+            for seg in range(segments + 1):
+                theta = 2 * np.pi * seg / segments  # 0 to 2*pi
+                
+                # Position
+                x = radius * np.sin(phi) * np.cos(theta)
+                y = radius * np.cos(phi)
+                z = radius * np.sin(phi) * np.sin(theta)
+                
+                # Normal (normalized position for unit sphere)
+                nx = np.sin(phi) * np.cos(theta)
+                ny = np.cos(phi)
+                nz = np.sin(phi) * np.sin(theta)
+                
+                # UV
+                u = seg / segments
+                v = ring / rings
+                
+                vertices_list.append([x, y, z, nx, ny, nz, u, v])
+        
+        # Generate indices
+        for ring in range(rings):
+            for seg in range(segments):
+                current = ring * (segments + 1) + seg
+                next_ring = (ring + 1) * (segments + 1) + seg
+                
+                # Two triangles per quad
+                indices_list.append([current, next_ring, current + 1])
+                indices_list.append([current + 1, next_ring, next_ring + 1])
+        
+        vertices = np.array(vertices_list, dtype=np.float32)
+        indices = np.array(indices_list, dtype=np.uint32)
+        
+        return Mesh(vertices, indices)
+
+    @classmethod
+    def create_capsule(cls, radius: float = 0.5, height: float = 1.0, segments: int = 32, rings: int = 8):
+        """Create a capsule mesh (cylinder with hemispherical caps).
+        
+        Args:
+            radius: Capsule radius
+            height: Height of the cylindrical part (total height = height + 2*radius)
+            segments: Number of segments around the capsule
+            rings: Number of rings for each hemisphere
+        """
+        vertices_list = []
+        indices_list = []
+        half_height = height / 2
+        
+        # Top hemisphere
+        for ring in range(rings + 1):
+            phi = (np.pi / 2) * ring / rings  # 0 to pi/2
+            for seg in range(segments + 1):
+                theta = 2 * np.pi * seg / segments
+                
+                x = radius * np.cos(phi) * np.cos(theta)
+                y = half_height + radius * np.sin(phi)
+                z = radius * np.cos(phi) * np.sin(theta)
+                
+                nx = np.cos(phi) * np.cos(theta)
+                ny = np.sin(phi)
+                nz = np.cos(phi) * np.sin(theta)
+                
+                u = seg / segments
+                v = 0.25 * ring / rings
+                
+                vertices_list.append([x, y, z, nx, ny, nz, u, v])
+        
+        top_hemi_vertex_count = (rings + 1) * (segments + 1)
+        
+        # Cylinder part (2 rings)
+        for i, cy in enumerate([half_height, -half_height]):
+            for seg in range(segments + 1):
+                theta = 2 * np.pi * seg / segments
+                
+                x = radius * np.cos(theta)
+                y = cy
+                z = radius * np.sin(theta)
+                
+                nx = np.cos(theta)
+                ny = 0
+                nz = np.sin(theta)
+                
+                u = seg / segments
+                v = 0.25 + 0.5 * i
+                
+                vertices_list.append([x, y, z, nx, ny, nz, u, v])
+        
+        cylinder_vertex_count = 2 * (segments + 1)
+        
+        # Bottom hemisphere
+        for ring in range(rings + 1):
+            phi = (np.pi / 2) + (np.pi / 2) * ring / rings  # pi/2 to pi
+            for seg in range(segments + 1):
+                theta = 2 * np.pi * seg / segments
+                
+                x = radius * np.cos(phi) * np.cos(theta)
+                y = -half_height + radius * np.sin(phi)
+                z = radius * np.cos(phi) * np.sin(theta)
+                
+                nx = np.cos(phi) * np.cos(theta)
+                ny = np.sin(phi)
+                nz = np.cos(phi) * np.sin(theta)
+                
+                u = seg / segments
+                v = 0.75 + 0.25 * ring / rings
+                
+                vertices_list.append([x, y, z, nx, ny, nz, u, v])
+        
+        # Generate indices for top hemisphere
+        for ring in range(rings):
+            for seg in range(segments):
+                current = ring * (segments + 1) + seg
+                next_ring = (ring + 1) * (segments + 1) + seg
+                indices_list.append([current, current + 1, next_ring])
+                indices_list.append([current + 1, next_ring + 1, next_ring])
+        
+        # Generate indices for cylinder
+        cyl_start = top_hemi_vertex_count
+        for seg in range(segments):
+            top_left = cyl_start + seg
+            top_right = cyl_start + seg + 1
+            bottom_left = cyl_start + (segments + 1) + seg
+            bottom_right = cyl_start + (segments + 1) + seg + 1
+            indices_list.append([top_left, top_right, bottom_left])
+            indices_list.append([top_right, bottom_right, bottom_left])
+        
+        # Generate indices for bottom hemisphere
+        bot_start = top_hemi_vertex_count + cylinder_vertex_count
+        for ring in range(rings):
+            for seg in range(segments):
+                current = bot_start + ring * (segments + 1) + seg
+                next_ring = bot_start + (ring + 1) * (segments + 1) + seg
+                indices_list.append([current, current + 1, next_ring])
+                indices_list.append([current + 1, next_ring + 1, next_ring])
+        
+        vertices = np.array(vertices_list, dtype=np.float32)
+        indices = np.array(indices_list, dtype=np.uint32)
+        
+        return Mesh(vertices, indices)
