@@ -28,13 +28,8 @@ class PathTracingRenderer:
         self.use_accum_check_box: spy.ui.CheckBox | None = None
         self.use_shadow_map_check_box: spy.ui.CheckBox | None = None
         
-        # [DEBUG] 
+        # Debug visualizer (可在发布时移除此行及相关调用)
         self.debug_visualizer: DebugVisualizer = DebugVisualizer(device)
-        self.debug_ui_window: spy.ui.Window | None = None
-        self.debug_frustum_check_box: spy.ui.CheckBox | None = None
-        self.debug_shadow_map_check_box: spy.ui.CheckBox | None = None
-        self.frustum_radius_slider: spy.ui.SliderFloat | None = None
-        self.frustum_distance_slider: spy.ui.SliderFloat | None = None
 
     def on_camera_move(self, data):
         self.reset_accumulator = True
@@ -71,8 +66,8 @@ class PathTracingRenderer:
         use_shadow_map = self._get_use_shadow_map()
         self.scene.use_shadow_map = use_shadow_map
         
-        # [DEBUG]
-        self._update_frustum_config()
+        # Update debug visualizer config from UI
+        self.debug_visualizer.update()
         
         if use_shadow_map:
             self.shadow_map_pass.execute(command_encoder, self.scene, self.scene.sun_direction)
@@ -93,8 +88,8 @@ class PathTracingRenderer:
             output,
         )
 
-        # [DEBUG] 调试可视化渲染，发布时可删除
-        if self._get_debug_frustum():
+        # Debug visualization (可在发布时移除此块)
+        if self.debug_visualizer.show_frustum:
             frustum = self.debug_visualizer.get_frustum_from_shadow_pass(
                 self.shadow_map_pass,
                 self.scene.sun_direction
@@ -107,8 +102,7 @@ class PathTracingRenderer:
                 self.scene.camera.inv_view_proj_matrix
             )
         
-        # 绘制 Shadow Map 纹理预览
-        if self._get_debug_shadow_map():
+        if self.debug_visualizer.show_shadow_map:
             self.debug_visualizer.draw_shadow_map_preview(
                 command_encoder,
                 output,
@@ -129,30 +123,6 @@ class PathTracingRenderer:
             return True
         return self.use_shadow_map_check_box.value
 
-    # [DEBUG] 
-    def _get_debug_frustum(self) -> bool:
-        """Get debug_frustum value from UI checkbox."""
-        if self.debug_frustum_check_box is None:
-            return False
-        return self.debug_frustum_check_box.value
-
-    # [DEBUG] 
-    def _get_debug_shadow_map(self) -> bool:
-        """Get debug_shadow_map value from UI checkbox."""
-        if self.debug_shadow_map_check_box is None:
-            return False
-        return self.debug_shadow_map_check_box.value
-
-    def _update_frustum_config(self):
-        """Update shadow map frustum config from UI sliders."""
-        cfg = self.shadow_map_pass.frustum_config
-        
-        if self.frustum_radius_slider is not None:
-            cfg.radius = self.frustum_radius_slider.value
-        
-        if self.frustum_distance_slider is not None:
-            cfg.distance = self.frustum_distance_slider.value
-
     @property
     def exposure(self) -> float:
         """Get current exposure value from UI slider (safe access)."""
@@ -169,28 +139,5 @@ class PathTracingRenderer:
         self.use_accum_check_box = spy.ui.CheckBox(ui_window, 'Use Accum')
         self.use_shadow_map_check_box = spy.ui.CheckBox(ui_window, 'Use Shadow Map')
         
-        # [DEBUG]
-        self._setup_debug_ui(ui_context)
-
-    def _setup_debug_ui(self, ui_context: spy.ui.Context):
-        """Setup separate debug UI window. Can be removed for release."""
-        self.debug_ui_window = spy.ui.Window(
-            ui_context.screen, "Debug Visualization", spy.float2(420, 10), spy.float2(300, 180)
-        )
-        
-        # Debug toggles
-        self.debug_frustum_check_box = spy.ui.CheckBox(
-            self.debug_ui_window, 'Show Light Frustum'
-        )
-        self.debug_shadow_map_check_box = spy.ui.CheckBox(
-            self.debug_ui_window, 'Show Shadow Map'
-        )
-        
-        # Frustum configuration sliders
-        cfg = self.shadow_map_pass.frustum_config
-        self.frustum_radius_slider = spy.ui.SliderFloat(
-            self.debug_ui_window, 'Frustum Radius', min=1.0, max=20.0, value=cfg.radius
-        )
-        self.frustum_distance_slider = spy.ui.SliderFloat(
-            self.debug_ui_window, 'Frustum Distance', min=10.0, max=40.0, value=cfg.distance
-        )
+        # Debug UI (可在发布时移除此行)
+        self.debug_visualizer.setup_ui(ui_context, self.shadow_map_pass)

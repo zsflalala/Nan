@@ -1,14 +1,6 @@
-"""
-Debug Visualizer for Shadow Map Orthographic Frustum
-
-This module provides visualization of the shadow map's orthographic frustum
-as a wireframe box overlay on the rendered scene.
-"""
-
 import slangpy as spy
 from dataclasses import dataclass
-from typing import List, Tuple
-
+from typing import List, Tuple, Optional
 
 @dataclass
 class FrustumData:
@@ -20,6 +12,12 @@ class FrustumData:
 
 
 class DebugVisualizer:
+    """
+    Debug visualization tool for shadow map frustum and related debugging features.
+    
+    This class manages its own UI and can be easily disabled/removed for release builds.
+    """
+    
     BOX_EDGES = [
         # Near face edges
         (0, 1), (1, 3), (3, 2), (2, 0),
@@ -39,6 +37,16 @@ class DebugVisualizer:
         self.preview_size = 256  # Preview window size in pixels
         self.preview_margin = 20  # Margin from bottom-right corner
         
+        # UI elements
+        self.ui_window: Optional[spy.ui.Window] = None
+        self.show_frustum_checkbox: Optional[spy.ui.CheckBox] = None
+        self.show_shadow_map_checkbox: Optional[spy.ui.CheckBox] = None
+        self.frustum_radius_slider: Optional[spy.ui.SliderFloat] = None
+        self.frustum_distance_slider: Optional[spy.ui.SliderFloat] = None
+        
+        # Reference to shadow pass for config updates
+        self._shadow_pass = None
+        
         # Load wireframe shader
         self.program = device.load_program("debug_visualizer.slang", ["compute_main"])
         self.pipeline = device.create_compute_pipeline(self.program)
@@ -53,6 +61,68 @@ class DebugVisualizer:
             usage=spy.BufferUsage.shader_resource,
             label="debug_edge_buffer"
         )
+    
+    def setup_ui(self, ui_context: spy.ui.Context, shadow_pass=None):
+        """
+        Setup debug UI window.
+        
+        Args:
+            ui_context: SlangPy UI context
+            shadow_pass: Optional ShadowMapPass for frustum config sliders
+        """
+        self._shadow_pass = shadow_pass
+        
+        self.ui_window = spy.ui.Window(
+            ui_context.screen, 
+            "Debug Visualization", 
+            spy.float2(420, 10), 
+            spy.float2(300, 180)
+        )
+        
+        # Debug toggles
+        self.show_frustum_checkbox = spy.ui.CheckBox(
+            self.ui_window, 'Show Light Frustum'
+        )
+        self.show_shadow_map_checkbox = spy.ui.CheckBox(
+            self.ui_window, 'Show Shadow Map'
+        )
+        
+        # Frustum configuration sliders (only if shadow pass provided)
+        if shadow_pass is not None:
+            cfg = shadow_pass.frustum_config
+            self.frustum_radius_slider = spy.ui.SliderFloat(
+                self.ui_window, 'Frustum Radius', min=1.0, max=20.0, value=cfg.radius
+            )
+            self.frustum_distance_slider = spy.ui.SliderFloat(
+                self.ui_window, 'Frustum Distance', min=10.0, max=40.0, value=cfg.distance
+            )
+    
+    def update(self):
+        """Update configurations from UI. Call this each frame."""
+        if self._shadow_pass is None:
+            return
+        
+        cfg = self._shadow_pass.frustum_config
+        
+        if self.frustum_radius_slider is not None:
+            cfg.radius = self.frustum_radius_slider.value
+        
+        if self.frustum_distance_slider is not None:
+            cfg.distance = self.frustum_distance_slider.value
+    
+    @property
+    def show_frustum(self) -> bool:
+        """Whether to show the light frustum visualization."""
+        if self.show_frustum_checkbox is None:
+            return False
+        return self.show_frustum_checkbox.value
+    
+    @property
+    def show_shadow_map(self) -> bool:
+        """Whether to show the shadow map preview."""
+        if self.show_shadow_map_checkbox is None:
+            return False
+        return self.show_shadow_map_checkbox.value
     
     def compute_frustum_corners(
         self,
