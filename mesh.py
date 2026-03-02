@@ -226,9 +226,8 @@ class Mesh:
                 current = ring * (segments + 1) + seg
                 next_ring = (ring + 1) * (segments + 1) + seg
                 
-                # Two triangles per quad
-                indices_list.append([current, next_ring, current + 1])
-                indices_list.append([current + 1, next_ring, next_ring + 1])
+                indices_list.append([current, current + 1, next_ring])
+                indices_list.append([current + 1, next_ring + 1, next_ring])
         
         vertices = np.array(vertices_list, dtype=np.float32)
         indices = np.array(indices_list, dtype=np.uint32)
@@ -251,17 +250,24 @@ class Mesh:
         
         # Top hemisphere
         for ring in range(rings + 1):
-            phi = (np.pi / 2) * ring / rings  # 0 to pi/2
+            phi = (np.pi / 2) * ring / rings
+            sin_phi = np.sin(phi)
+            cos_phi = np.cos(phi)
+            
             for seg in range(segments + 1):
                 theta = 2 * np.pi * seg / segments
+                sin_theta = np.sin(theta)
+                cos_theta = np.cos(theta)
                 
-                x = radius * np.cos(phi) * np.cos(theta)
-                y = half_height + radius * np.sin(phi)
-                z = radius * np.cos(phi) * np.sin(theta)
+                # Position - standard sphere formula, offset up by half_height
+                x = radius * sin_phi * cos_theta
+                y = half_height + radius * cos_phi
+                z = radius * sin_phi * sin_theta
                 
-                nx = np.cos(phi) * np.cos(theta)
-                ny = np.sin(phi)
-                nz = np.cos(phi) * np.sin(theta)
+                # Normal - same as sphere, pointing outward
+                nx = sin_phi * cos_theta
+                ny = cos_phi
+                nz = sin_phi * sin_theta
                 
                 u = seg / segments
                 v = 0.25 * ring / rings
@@ -270,18 +276,21 @@ class Mesh:
         
         top_hemi_vertex_count = (rings + 1) * (segments + 1)
         
-        # Cylinder part (2 rings)
+        # Cylinder part (2 rings at top and bottom of cylinder)
         for i, cy in enumerate([half_height, -half_height]):
             for seg in range(segments + 1):
                 theta = 2 * np.pi * seg / segments
+                sin_theta = np.sin(theta)
+                cos_theta = np.cos(theta)
                 
-                x = radius * np.cos(theta)
+                x = radius * cos_theta
                 y = cy
-                z = radius * np.sin(theta)
+                z = radius * sin_theta
                 
-                nx = np.cos(theta)
+                # Normal - horizontal, pointing outward
+                nx = cos_theta
                 ny = 0
-                nz = np.sin(theta)
+                nz = sin_theta
                 
                 u = seg / segments
                 v = 0.25 + 0.5 * i
@@ -292,17 +301,24 @@ class Mesh:
         
         # Bottom hemisphere
         for ring in range(rings + 1):
-            phi = (np.pi / 2) + (np.pi / 2) * ring / rings  # pi/2 to pi
+            phi = (np.pi / 2) + (np.pi / 2) * ring / rings
+            sin_phi = np.sin(phi)
+            cos_phi = np.cos(phi)
+            
             for seg in range(segments + 1):
                 theta = 2 * np.pi * seg / segments
+                sin_theta = np.sin(theta)
+                cos_theta = np.cos(theta)
                 
-                x = radius * np.cos(phi) * np.cos(theta)
-                y = -half_height + radius * np.sin(phi)
-                z = radius * np.cos(phi) * np.sin(theta)
+                # Position - standard sphere formula, offset down by half_height
+                x = radius * sin_phi * cos_theta
+                y = -half_height + radius * cos_phi
+                z = radius * sin_phi * sin_theta
                 
-                nx = np.cos(phi) * np.cos(theta)
-                ny = np.sin(phi)
-                nz = np.cos(phi) * np.sin(theta)
+                # Normal - same as sphere, pointing outward
+                nx = sin_phi * cos_theta
+                ny = cos_phi
+                nz = sin_phi * sin_theta
                 
                 u = seg / segments
                 v = 0.75 + 0.25 * ring / rings

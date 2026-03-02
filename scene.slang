@@ -56,6 +56,13 @@ struct Scene {
     float4x4 light_view_proj;
     float shadow_map_size;
     bool use_shadow_map;
+    
+    // Shadow filtering mode: 0=Hard, 1=PCF, 2=PCSS
+    uint shadow_filter_mode;
+    // PCF/PCSS parameters
+    float pcf_radius;           // PCF filter radius in texels (default: 3.0)
+    float pcss_light_size;      // PCSS light size for penumbra calculation (default: 1.0)
+    uint pcf_sample_count;      // Number of PCF samples (default: 16)
 
     DirectionalLight directional_light;
 
@@ -381,10 +388,106 @@ struct Scene {
 
         if (any(abs(ndc.xy) > 1.0) || ndc.z < 0.0 || ndc.z > 1.0) return 1.0;
         float2 uv = ndc.xy * 0.5 + 0.5;
-        float closest_depth = shadow_map.SampleLevel(linear_sampler, uv, 0);
         float current_depth = ndc.z;
-        float bias = 0.001; 
+        float bias = 0.002;
+        
+        // Select shadow filtering mode
+        if (shadow_filter_mode == 0) {
+            // Hard shadows
+            return get_shadow_hard(uv, current_depth, bias);
+        } else if (shadow_filter_mode == 1) {
+            // PCF
+            return get_shadow_pcf(uv, current_depth, bias, pcf_radius);
+        } else {
+            // PCSS
+            return get_shadow_pcss(uv, current_depth, bias);
+        }
+    }
+    
+    // Hard shadow (single sample)
+    float get_shadow_hard(float2 uv, float current_depth, float bias)
+    {
+        float closest_depth = shadow_map.SampleLevel(linear_sampler, uv, 0);
         return (current_depth - bias < closest_depth) ? 1.0 : 0.0;
+    }
+    
+    // PCF (Percentage Closer Filtering) - fixed radius soft shadows
+    float get_shadow_pcf(float2 uv, float current_depth, float bias, float filter_radius)
+    {
+        float texel_size = 1.0 / shadow_map_size;
+        float shadow = 0.0;
+        
+        // Poisson disk sampling pattern (16 samples)
+        static const float2 poisson_disk[16] = {
+            float2(-0.94201624, -0.39906216), float2(0.94558609, -0.76890725),
+            float2(-0.094184101, -0.92938870), float2(0.34495938, 0.29387760),
+            float2(-0.91588581, 0.45771432), float2(-0.81544232, -0.87912464),
+            float2(-0.38277543, 0.27676845), float2(0.97484398, 0.75648379),
+            float2(0.44323325, -0.97511554), float2(0.53742981, -0.47373420),
+            float2(-0.26496911, -0.41893023), float2(0.79197514, 0.19090188),
+            float2(-0.24188840, 0.99706507), float2(-0.81409955, 0.91437590),
+            float2(0.19984126, 0.78641367), float2(0.14383161, -0.14100790)
+        };
+        
+        uint sample_count = min(pcf_sample_count, 16u);
+        for (uint i = 0; i < sample_count; i++) {
+            float2 offset = poisson_disk[i] * filter_radius * texel_size;
+            float depth = shadow_map.SampleLevel(linear_sampler, uv + offset, 0);
+            shadow += (current_depth - bias < depth) ? 1.0 : 0.0;
+        }
+        
+        return shadow / float(sample_count);
+    }
+    
+    // PCSS (Percentage Closer Soft Shadows) - directional lights
+    float get_shadow_pcss(float2 uv, float current_depth, float bias)
+    {
+        float texel_size = 1.0 / shadow_map_size;
+        
+        // Step 1: Blocker search - find average blocker depth
+        // For directional lights, search radius is constant (not scaled by receiver depth)
+        float blocker_sum = 0.0;
+        float blocker_count = 0.0;
+        
+        // Search radius: for parallel lights, this is based on light angular size
+        // Typical sun angular diameter is ~0.53°, scaled to shadow map texels
+        float search_radius = pcss_light_size * 5.0; // Fixed search radius for parallel light
+        
+        static const float2 poisson_disk[16] = {
+            float2(-0.94201624, -0.39906216), float2(0.94558609, -0.76890725),
+            float2(-0.094184101, -0.92938870), float2(0.34495938, 0.29387760),
+            float2(-0.91588581, 0.45771432), float2(-0.81544232, -0.87912464),
+            float2(-0.38277543, 0.27676845), float2(0.97484398, 0.75648379),
+            float2(0.44323325, -0.97511554), float2(0.53742981, -0.47373420),
+            float2(-0.26496911, -0.41893023), float2(0.79197514, 0.19090188),
+            float2(-0.24188840, 0.99706507), float2(-0.81409955, 0.91437590),
+            float2(0.19984126, 0.78641367), float2(0.14383161, -0.14100790)
+        };
+        
+        for (uint i = 0; i < 16; i++) {
+            float2 offset = poisson_disk[i] * search_radius * texel_size;
+            float depth = shadow_map.SampleLevel(linear_sampler, uv + offset, 0);
+            if (depth < current_depth - bias) {
+                blocker_sum += depth;
+                blocker_count += 1.0;
+            }
+        }
+        
+        // No blockers found - fully lit
+        if (blocker_count < 1.0) return 1.0;
+        
+        float avg_blocker_depth = blocker_sum / blocker_count;
+        
+        // Step 2: Calculate penumbra width for directional light (orthographic projection)
+        // For parallel light rays, penumbra width is proportional to:
+        //   penumbra = light_angular_size * distance_to_blocker
+        // where distance = (receiver_depth - blocker_depth) * frustum_depth_range
+        float depth_diff = current_depth - avg_blocker_depth;
+        float penumbra_width = pcss_light_size * depth_diff * 50.0; // Scale factor for visible effect
+        penumbra_width = clamp(penumbra_width, 1.0, 15.0); // Clamp to reasonable range
+        
+        // Step 3: PCF with variable filter radius
+        return get_shadow_pcf(uv, current_depth, bias, penumbra_width);
     }
 
     // Sample sky with sun disk (atmospheric scattering + sun disk)

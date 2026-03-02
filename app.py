@@ -97,6 +97,11 @@ class App:
 
         self.event_dispatcher: SyncEventDispatcher = event_dispatcher.SyncEventDispatcher()
         self.scene: Scene = Scene(self.device, self.scene_node, self.event_dispatcher)
+        
+        # Apply shadow map size from configuration if selected
+        if self.selected_scene_config and hasattr(self.selected_scene_config, 'shadow_map_size'):
+            self.scene.shadow_map_size = float(self.selected_scene_config.shadow_map_size)
+            print(f"[App] Shadow Map Size set to: {self.scene.shadow_map_size}")
 
         self.camera_controller: CameraController = CameraController(self.scene_node.camera)
         self.camera_controller.move_test = self.config.camera_move_test
@@ -121,7 +126,7 @@ class App:
             if scene_config.scene_type == SceneType.DEMO:
                 return SceneNode.demo()
             elif scene_config.scene_type == SceneType.RANDOM_OBJECTS:
-                return SceneNode.random_objects_scene()
+                return SceneNode.random_objects_scene(seed=42)
             elif scene_config.path is not None:
                 return SceneNode.load_asset(str(scene_config.path), scale=scene_config.scale)
             else:

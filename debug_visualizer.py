@@ -10,7 +10,6 @@ class FrustumData:
     light_pos: spy.float3  # Virtual light position
     light_dir: spy.float3  # Light direction
 
-
 class DebugVisualizer:
     """
     Debug visualization tool for shadow map frustum and related debugging features.
@@ -76,7 +75,7 @@ class DebugVisualizer:
             ui_context.screen, 
             "Debug Visualization", 
             spy.float2(420, 10), 
-            spy.float2(300, 180)
+            spy.float2(450, 180)
         )
         
         # Debug toggles
@@ -91,7 +90,7 @@ class DebugVisualizer:
         if shadow_pass is not None:
             cfg = shadow_pass.frustum_config
             self.frustum_radius_slider = spy.ui.SliderFloat(
-                self.ui_window, 'Frustum Radius', min=1.0, max=20.0, value=cfg.radius
+                self.ui_window, 'Frustum Radius', min=1.0, max=50.0, value=cfg.radius
             )
             self.frustum_distance_slider = spy.ui.SliderFloat(
                 self.ui_window, 'Frustum Distance', min=10.0, max=40.0, value=cfg.distance

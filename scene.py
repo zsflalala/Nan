@@ -274,6 +274,12 @@ class Scene:
         self.light_view_proj: spy.float4x4 = spy.float4x4.identity()
         self.shadow_map_size: float = 2048.0
         
+        # Shadow filtering settings
+        self.shadow_filter_mode: int = 0  # 0=Hard, 1=PCF, 2=PCSS
+        self.pcf_radius: float = 3.0      # PCF filter radius in texels
+        self.pcss_light_size: float = 1.0 # PCSS light size
+        self.pcf_sample_count: int = 16   # Number of PCF samples
+        
         # Start async location fetch
         # SunPosition.get_current_location_async(self._on_location_received)
         
@@ -800,6 +806,12 @@ class Scene:
         cursor["light_view_proj"] = self.light_view_proj
         cursor["shadow_map_size"] = self.shadow_map_size
         cursor["use_shadow_map"] = self.use_shadow_map
+        
+        # Shadow filtering parameters
+        cursor["shadow_filter_mode"] = self.shadow_filter_mode
+        cursor["pcf_radius"] = self.pcf_radius
+        cursor["pcss_light_size"] = self.pcss_light_size
+        cursor["pcf_sample_count"] = self.pcf_sample_count
 
         cursor["instance_count"] = len(self.instance_descs)
         cursor["frame_index"] = self._frame_index

@@ -739,34 +739,52 @@ class SceneNode:
         
         # Create 9 random objects
         for i in range(9):
-            # Random color (bright, saturated colors)
-            hue = random.random()
-            saturation = 0.7 + random.random() * 0.3
-            value = 0.7 + random.random() * 0.3
+            # Random color (vibrant, high-saturation colors - avoid dark/black)
+            bright_colors = [
+                spy.float3(1.0, 0.2, 0.2),   # Red
+                spy.float3(0.2, 1.0, 0.2),   # Green
+                spy.float3(0.2, 0.4, 1.0),   # Blue
+                spy.float3(1.0, 1.0, 0.2),   # Yellow
+                spy.float3(1.0, 0.5, 0.0),   # Orange
+                spy.float3(0.8, 0.2, 1.0),   # Purple
+                spy.float3(0.0, 1.0, 1.0),   # Cyan
+                spy.float3(1.0, 0.4, 0.7),   # Pink
+                spy.float3(0.5, 1.0, 0.5),   # Light Green
+            ]
             
-            # HSV to RGB conversion
-            h_i = int(hue * 6)
-            f = hue * 6 - h_i
-            p = value * (1 - saturation)
-            q = value * (1 - f * saturation)
-            t = value * (1 - (1 - f) * saturation)
-            
-            if h_i == 0:
-                r, g, b = value, t, p
-            elif h_i == 1:
-                r, g, b = q, value, p
-            elif h_i == 2:
-                r, g, b = p, value, t
-            elif h_i == 3:
-                r, g, b = p, q, value
-            elif h_i == 4:
-                r, g, b = t, p, value
+            # Use predefined colors or generate random bright ones
+            if i < len(bright_colors):
+                color = bright_colors[i]
             else:
-                r, g, b = value, p, q
+                # Generate random bright color using HSV with high saturation and value
+                hue = random.random()
+                saturation = 0.8 + random.random() * 0.2  # 0.8-1.0 (high saturation)
+                value = 0.85 + random.random() * 0.15     # 0.85-1.0 (high brightness)
+                
+                # HSV to RGB conversion
+                h_i = int(hue * 6)
+                f = hue * 6 - h_i
+                p = value * (1 - saturation)
+                q = value * (1 - f * saturation)
+                t = value * (1 - (1 - f) * saturation)
+                
+                if h_i == 0:
+                    r, g, b = value, t, p
+                elif h_i == 1:
+                    r, g, b = q, value, p
+                elif h_i == 2:
+                    r, g, b = p, value, t
+                elif h_i == 3:
+                    r, g, b = p, q, value
+                elif h_i == 4:
+                    r, g, b = t, p, value
+                else:
+                    r, g, b = value, p, q
+                
+                color = spy.float3(r, g, b)
             
-            color = spy.float3(r, g, b)
-            roughness = 0.2 + random.random() * 0.6
-            metallic = random.random() * 0.5
+            roughness = 0.3 + random.random() * 0.4  # 0.3-0.7 (not too shiny, not too matte)
+            metallic = random.random() * 0.3  # 0-0.3 (mostly non-metallic for better color)
             
             mat = scene_node.add_material(Material(
                 base_color=color,
@@ -826,4 +844,3 @@ class SceneNode:
                 scene_node.add_instance(cube_mesh, mat, tid)
         
         return scene_node
-
