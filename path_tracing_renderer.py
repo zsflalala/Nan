@@ -228,7 +228,4 @@ class PathTracingRenderer:
         )
         self.pcss_light_size_slider = spy.ui.SliderFloat(
             self._shadow_ui_window, '  Light Size', min=0.1, max=5.0, value=1.0
-        )        
-        def on_exposure_changed(value):
-            self.tone_mapper.exposure = value
-        spy.ui.SliderFloat(ui_window, 'Exposure', min=-4.0, max=4.0, value=1.0, callback=on_exposure_changed)
+        )
