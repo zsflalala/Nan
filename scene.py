@@ -25,156 +25,6 @@ from sun_position import SunPosition, SunPositionData
 from texture_manager import TextureManager, TextureType, TextureRecord
 
 
-class AtmosphereTransmittance:
-    """
-    Calculate atmospheric transmittance toward the sun based on sun elevation angle.
-    
-    Uses simplified Rayleigh + Mie + Ozone absorption model matching UE's SkyAtmosphere.
-    Reference: SkyAtmosphereCommonData.cpp GetTransmittanceAtGroundLevel()
-    """
-    
-    # Atmosphere parameters (in Mm = megameters = 1000 km)
-    BOTTOM_RADIUS_MM = 6.360     # Earth radius in Mm
-    TOP_RADIUS_MM = 6.460        # Atmosphere top in Mm
-    
-    # Rayleigh scattering (wavelength-dependent, causes blue sky)
-    RAYLEIGH_DENSITY_EXP_SCALE = -1.0 / 0.008  # Scale height ~8km
-    RAYLEIGH_SCATTERING = (0.005802, 0.013558, 0.033100)  # RGB scattering coefficients
-    
-    # Mie scattering (aerosols, wavelength-independent)
-    MIE_DENSITY_EXP_SCALE = -1.0 / 0.0012  # Scale height ~1.2km
-    MIE_EXTINCTION = (0.004440, 0.004440, 0.004440)  # Equal across RGB
-    
-    # Ozone absorption (absorbs in UV and some visible)
-    ABSORPTION_EXTINCTION = (0.000650, 0.001881, 0.000085)
-    ABSORPTION_DENSITY_0_LAYER_WIDTH = 0.025  # 25km
-    ABSORPTION_DENSITY_0_CONSTANT_TERM = -2.0 / 3.0
-    ABSORPTION_DENSITY_0_LINEAR_TERM = 1.0 / 0.015  # 15km scale
-    ABSORPTION_DENSITY_1_CONSTANT_TERM = 8.0 / 3.0
-    ABSORPTION_DENSITY_1_LINEAR_TERM = -1.0 / 0.015
-    
-    # Minimum elevation angle for transmittance calculation (avoid divide by zero)
-    MIN_ELEVATION_ANGLE = -5.0  # degrees
-    
-    @staticmethod
-    def calculate(sun_direction: Tuple[float, float, float]) -> Tuple[float, float, float]:
-        """
-        Calculate atmospheric transmittance for light traveling from the sun to ground level.
-        
-        Args:
-            sun_direction: Unit vector pointing toward the sun (x, y, z) in Y-up coords
-            
-        Returns:
-            RGB transmittance values (0 to 1), representing how much light passes through
-        """
-        # Get sun elevation from direction (Y is up)
-        elevation_rad = math.asin(max(-1.0, min(1.0, sun_direction[1])))
-        elevation_deg = math.degrees(elevation_rad)
-        
-        # Clamp to minimum elevation to avoid extreme values
-        elevation_deg = max(AtmosphereTransmittance.MIN_ELEVATION_ANGLE, elevation_deg)
-        elevation_rad = math.radians(elevation_deg)
-        
-        # World position: 500m above ground (like UE)
-        world_pos_z = AtmosphereTransmittance.BOTTOM_RADIUS_MM + 0.0005  # 0.5 Mm = 500m
-        world_pos = (0.0, 0.0, world_pos_z)
-        
-        # World direction: based on elevation (azimuth doesn't matter due to symmetry)
-        world_dir = (math.cos(elevation_rad), 0.0, math.sin(elevation_rad))
-        
-        # Calculate optical depth by ray marching
-        optical_depth = AtmosphereTransmittance._calculate_optical_depth(world_pos, world_dir)
-        
-        # Transmittance = exp(-optical_depth)
-        transmittance = (
-            math.exp(-optical_depth[0]),
-            math.exp(-optical_depth[1]),
-            math.exp(-optical_depth[2])
-        )
-        
-        return transmittance
-    
-    @staticmethod
-    def _ray_sphere_intersect(ray_origin, ray_dir, sphere_radius):
-        """Find nearest intersection of ray with sphere centered at origin."""
-        # Quadratic coefficients: at² + bt + c = 0
-        a = ray_dir[0]**2 + ray_dir[1]**2 + ray_dir[2]**2
-        b = 2.0 * (ray_origin[0]*ray_dir[0] + ray_origin[1]*ray_dir[1] + ray_origin[2]*ray_dir[2])
-        c = ray_origin[0]**2 + ray_origin[1]**2 + ray_origin[2]**2 - sphere_radius**2
-        
-        discriminant = b*b - 4*a*c
-        if discriminant < 0:
-            return -1.0
-        
-        sqrt_disc = math.sqrt(discriminant)
-        t0 = (-b - sqrt_disc) / (2*a)
-        t1 = (-b + sqrt_disc) / (2*a)
-        
-        if t0 < 0 and t1 < 0:
-            return -1.0
-        if t0 < 0:
-            return max(0.0, t1)
-        if t1 < 0:
-            return max(0.0, t0)
-        return max(0.0, min(t0, t1))
-    
-    @staticmethod
-    def _calculate_optical_depth(world_pos, world_dir):
-        """Ray march through atmosphere to calculate optical depth."""
-        # Find intersection with atmosphere top
-        t_max = AtmosphereTransmittance._ray_sphere_intersect(
-            world_pos, world_dir, AtmosphereTransmittance.TOP_RADIUS_MM
-        )
-        
-        if t_max <= 0:
-            return (0.0, 0.0, 0.0)
-        
-        optical_depth = [0.0, 0.0, 0.0]
-        sample_count = 15
-        sample_step = 1.0 / sample_count
-        sample_length = sample_step * t_max
-        
-        for i in range(sample_count):
-            t = (i + 0.5) * sample_step * t_max
-            pos = (
-                world_pos[0] + world_dir[0] * t,
-                world_pos[1] + world_dir[1] * t,
-                world_pos[2] + world_dir[2] * t
-            )
-            
-            # Height above ground
-            height = math.sqrt(pos[0]**2 + pos[1]**2 + pos[2]**2)
-            view_height = height - AtmosphereTransmittance.BOTTOM_RADIUS_MM
-            
-            # Rayleigh density
-            density_ray = max(0.0, math.exp(AtmosphereTransmittance.RAYLEIGH_DENSITY_EXP_SCALE * view_height))
-            
-            # Mie density
-            density_mie = max(0.0, math.exp(AtmosphereTransmittance.MIE_DENSITY_EXP_SCALE * view_height))
-            
-            # Ozone density (peaks around 25km)
-            if view_height < AtmosphereTransmittance.ABSORPTION_DENSITY_0_LAYER_WIDTH:
-                density_ozo = max(0.0, min(1.0,
-                    AtmosphereTransmittance.ABSORPTION_DENSITY_0_LINEAR_TERM * view_height +
-                    AtmosphereTransmittance.ABSORPTION_DENSITY_0_CONSTANT_TERM
-                ))
-            else:
-                density_ozo = max(0.0, min(1.0,
-                    AtmosphereTransmittance.ABSORPTION_DENSITY_1_LINEAR_TERM * view_height +
-                    AtmosphereTransmittance.ABSORPTION_DENSITY_1_CONSTANT_TERM
-                ))
-            
-            # Extinction = scattering + absorption
-            for c in range(3):
-                extinction = (
-                    density_mie * AtmosphereTransmittance.MIE_EXTINCTION[c] +
-                    density_ray * AtmosphereTransmittance.RAYLEIGH_SCATTERING[c] +
-                    density_ozo * AtmosphereTransmittance.ABSORPTION_EXTINCTION[c]
-                )
-                optical_depth[c] += sample_length * extinction
-        
-        return tuple(optical_depth)
-
 class Scene:
     # Instance flags (must match InstanceFlags in common.slang)
     INSTANCE_FLAG_NONE = 0
@@ -187,6 +37,7 @@ class Scene:
     TEXTURE_FLAG_ROUGHNESS = 1 << 2
     TEXTURE_FLAG_METALLIC = 1 << 3
     TEXTURE_FLAG_EMISSIVE = 1 << 4
+    TEXTURE_FLAG_SPECULAR_COLOR = 1 << 5
     
     @dataclass
     class MaterialData:
@@ -200,12 +51,14 @@ class Scene:
         texture_flags: int
         alpha_mode: int
         alpha_cutoff: float
+        specular_color: spy.float3
         # TextureRecords for bindless handles (None means use default)
         base_color_tex: Optional[TextureRecord]
         normal_tex: Optional[TextureRecord]
         roughness_tex: Optional[TextureRecord]
         metallic_tex: Optional[TextureRecord]
         emissive_tex: Optional[TextureRecord]
+        specular_color_tex: Optional[TextureRecord]
 
     @dataclass
     class MeshDesc:
@@ -239,6 +92,14 @@ class Scene:
         self.event_distpacher: SyncEventDispatcher = event_distpacher
 
         self.linear_sampler: Sampler = device.create_sampler()
+        self.transmittance_sampler: Sampler = device.create_sampler(
+            address_u=spy.TextureAddressingMode.clamp_to_edge,
+            address_v=spy.TextureAddressingMode.clamp_to_edge,
+            address_w=spy.TextureAddressingMode.clamp_to_edge,
+            min_filter=spy.TextureFilteringMode.linear,
+            mag_filter=spy.TextureFilteringMode.linear,
+            mip_filter=spy.TextureFilteringMode.linear,
+        )
         self.camera: Camera = scene_node.camera
         self.asset_path: str = scene_node.asset_path
         
@@ -307,6 +168,7 @@ class Scene:
             roughness_tex = None
             metallic_tex = None
             emissive_tex = None
+            specular_color_tex = None
             texture_flags = 0
             
             if m.base_color_texture:
@@ -329,6 +191,10 @@ class Scene:
                 emissive_tex = self.texture_manager.load_texture(m.emissive_texture, TextureType.EMISSIVE)
                 texture_flags |= Scene.TEXTURE_FLAG_EMISSIVE
             
+            if m.specular_color_texture:
+                specular_color_tex = self.texture_manager.load_texture(m.specular_color_texture, TextureType.SPECULAR_COLOR)
+                texture_flags |= Scene.TEXTURE_FLAG_SPECULAR_COLOR
+            
             # Debug: print texture_flags for all materials
             print(f"[Scene] Material {i} (desc_idx={len(self.material_data_list)}): texture_flags={texture_flags}, "
                   f"base_color={m.base_color}, "
@@ -344,11 +210,13 @@ class Scene:
                 texture_flags=texture_flags,
                 alpha_mode=m.alpha_mode,
                 alpha_cutoff=m.alpha_cutoff,
+                specular_color=m.specular_color,
                 base_color_tex=base_color_tex,
                 normal_tex=normal_tex,
                 roughness_tex=roughness_tex,
                 metallic_tex=metallic_tex,
-                emissive_tex=emissive_tex
+                emissive_tex=emissive_tex,
+                specular_color_tex=specular_color_tex
             ))
         
         # Create material buffer using BufferCursor for proper Handle binding
@@ -647,11 +515,13 @@ class Scene:
                 texture_flags=0,
                 alpha_mode=ALPHA_MODE_OPAQUE,
                 alpha_cutoff=0.5,
+                specular_color=spy.float3(1.0, 1.0, 1.0),
                 base_color_tex=None,
                 normal_tex=None,
                 roughness_tex=None,
                 metallic_tex=None,
-                emissive_tex=None
+                emissive_tex=None,
+                specular_color_tex=None
             )]
         
         # Load the common.slang module to get MaterialDesc layout
@@ -678,6 +548,7 @@ class Scene:
         default_roughness = self.texture_manager.get_default_texture(TextureType.ROUGHNESS)
         default_metallic = self.texture_manager.get_default_texture(TextureType.METALLIC)
         default_emissive = self.texture_manager.get_default_texture(TextureType.EMISSIVE)
+        default_specular_color = self.texture_manager.get_default_texture(TextureType.SPECULAR_COLOR)
         
         # Fill buffer using BufferCursor
         cursor = spy.BufferCursor(material_desc_layout, buffer, load_before_write=False)
@@ -691,7 +562,7 @@ class Scene:
             cursor[i].texture_flags = mat.texture_flags
             cursor[i].alpha_mode = mat.alpha_mode
             cursor[i].alpha_cutoff = mat.alpha_cutoff
-            # pad0, pad1, pad2 are automatically zero
+            cursor[i].specular_color = mat.specular_color
             
             # Set texture handles using descriptor_handle_ro from TextureView
             base_tex = mat.base_color_tex if mat.base_color_tex else default_base_color
@@ -699,12 +570,14 @@ class Scene:
             rough_tex = mat.roughness_tex if mat.roughness_tex else default_roughness
             metal_tex = mat.metallic_tex if mat.metallic_tex else default_metallic
             emiss_tex = mat.emissive_tex if mat.emissive_tex else default_emissive
+            spec_color_tex = mat.specular_color_tex if mat.specular_color_tex else default_specular_color
             
             cursor[i].base_color_tex_handle = base_tex.view.descriptor_handle_ro
             cursor[i].normal_tex_handle = normal_tex.view.descriptor_handle_ro
             cursor[i].roughness_tex_handle = rough_tex.view.descriptor_handle_ro
             cursor[i].metallic_tex_handle = metal_tex.view.descriptor_handle_ro
             cursor[i].emissive_tex_handle = emiss_tex.view.descriptor_handle_ro
+            cursor[i].specular_color_tex_handle = spec_color_tex.view.descriptor_handle_ro
         
         cursor.apply()
         return buffer
@@ -758,7 +631,7 @@ class Scene:
         """Setup scene-related UI elements."""
         now = datetime.now()
         current_hours = now.hour + now.minute / 60.0 + now.second / 3600.0
-        self._hours_slider = spy.ui.SliderFloat(ui_window, 'Hours', min=0, max=24, value=current_hours)
+        self._hours_slider = spy.ui.SliderFloat(ui_window, 'Hours', min=0, max=23.99, value=current_hours)
         # Directional light intensity slider (0 to 20, default: PI)
         self._intensity_slider = spy.ui.SliderFloat(ui_window, 'Sun Intensity', min=0, max=20, value=self._directional_light_intensity)
         # Initialize sun position with current time
@@ -796,6 +669,8 @@ class Scene:
         cursor["indices"] = self.index_buffer
         cursor["transforms"] = self.transform_buffer
         cursor["inverse_transpose_transforms"] = self.inverse_transpose_transforms_buffer
+        cursor["transmittance_lut"] = self.transmittance_lut_gen.get_texture()
+        cursor["transmittance_sampler"] = self.transmittance_sampler
         cursor["sky_view_lut"] = self.sky_view_lut_gen.get_texture()
         cursor["linear_sampler"] = self.linear_sampler
         cursor["sun_direction"] = self._sun_direction
@@ -816,20 +691,11 @@ class Scene:
         cursor["instance_count"] = len(self.instance_descs)
         cursor["frame_index"] = self._frame_index
         
-        # Calculate atmospheric transmittance based on sun direction
-        sun_dir_tuple = (
-            float(self._sun_direction[0]),
-            float(self._sun_direction[1]),
-            float(self._sun_direction[2])
-        )
-        transmittance = AtmosphereTransmittance.calculate(sun_dir_tuple)
-        
         # Bind directional light parameters
         # Direction is same as sun_direction (pointing toward the sun)
         cursor["directional_light"]["direction"] = self._sun_direction
         cursor["directional_light"]["cos_half_angle"] = self._directional_light_cos_half_angle
         cursor["directional_light"]["color"] = self._directional_light_color
         cursor["directional_light"]["intensity"] = self._directional_light_intensity
-        cursor["directional_light"]["transmittance"] = spy.float3(transmittance[0], transmittance[1], transmittance[2])
         
         self.camera.bind(cursor["camera"])

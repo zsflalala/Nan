@@ -9,17 +9,10 @@ struct DirectionalLight {
     float cos_half_angle;       // cos(half_apex_angle), for cone sampling. Default: cos(0.2725°) ≈ 0.99999
     float3 color;               // Light color (default: white)
     float intensity;            // Light intensity in outer space (default: PI ≈ 3.14159)
-    float3 transmittance;       // Atmospheric transmittance toward sun (computed from sun elevation)
-    float pad0;
     
     // Outer space illuminance (used for sky LUT, which already includes scattering)
     float3 get_outer_space_illuminance() {
         return color * intensity;
-    }
-    
-    // Ground-level illuminance after atmospheric attenuation (used for NEE direct lighting)
-    float3 get_ground_illuminance() {
-        return color * intensity * transmittance;
     }
 };
 
@@ -46,6 +39,9 @@ struct Scene {
 
     StructuredBuffer<float4x4> transforms;
     StructuredBuffer<float4x4> inverse_transpose_transforms;
+
+    Texture2D<float4> transmittance_lut;
+    SamplerState transmittance_sampler;
 
     Texture2D<float4> sky_view_lut;
     SamplerState linear_sampler;
@@ -179,6 +175,7 @@ struct Scene {
         float3 emissive_color = material.emissive;
         float roughness_value = material.roughness;
         float metallic_value = material.metallic;
+        float3 specular_color_value = material.specular_color;
         
         if (material.has_base_color_texture())
         {
@@ -201,6 +198,11 @@ struct Scene {
         {
             // glTF: metallic is in B channel of metallicRoughness texture
             metallic_value = material.metallic_tex_handle.SampleLevel(linear_sampler, uv, 0).b;
+        }
+        
+        if (material.has_specular_color_texture())
+        {
+            specular_color_value = material.specular_color_tex_handle.SampleLevel(linear_sampler, uv, 0).rgb * material.specular_color;
         }
         
         // Normal mapping
@@ -263,7 +265,7 @@ struct Scene {
         shading_data.diffuse = diffuse_color;
         shading_data.emissive = emissive_color;
         shading_data.roughness = roughness_value;
-        shading_data.specular = 0.04 * (1.0 - metallic_value);  // Default dielectric F0
+        shading_data.specular = 0.04 * (1.0 - metallic_value) * specular_color_value;  // Dielectric F0 * specular color
         return shading_data;
     }
 
@@ -306,8 +308,7 @@ struct Scene {
         
         if (view_dot_light > cos_half_apex)
         {
-            // Get atmospheric transmittance
-            float3 transmittance = directional_light.transmittance;
+            float3 transmittance = get_sun_transmittance_at_view();
             
             // Calculate sun disk luminance from illuminance
             float solid_angle = 2.0 * PI * (1.0 - cos_half_apex);
@@ -335,7 +336,7 @@ struct Scene {
         float3 up = viewPos / height;
         
         float horizonAngle = safeacos(sqrt(height * height - groundRadiusMM * groundRadiusMM) / height) - 0.5 * PI;
-        float altitudeAngle = asin(dot(rayDir, up)); // Between -PI/2 and PI/2
+        float altitudeAngle = clamp(asin(dot(rayDir, up)), -0.5 * PI + 1e-2, 0.5 * PI - 1e-2); // Between -PI/2 and PI/2
         
         // Compute azimuth relative to sun direction
         float azimuthAngle; // Between -PI and PI
@@ -533,16 +534,30 @@ struct Scene {
         // 
         // Use ground-level illuminance which includes atmospheric transmittance
         // (light is attenuated as it travels through the atmosphere to reach the surface)
-        float3 illuminance = directional_light.get_ground_illuminance();
+        float3 illuminance = directional_light.get_outer_space_illuminance() * get_sun_transmittance_at_view();
         float3 radiance = visibility * f * illuminance * NdotL;
         
         return float4(radiance, pdf);
     }
 
+    float3 get_sun_transmittance_at_view()
+    {
+        float height = length(viewPos);
+        float3 up = viewPos / height;
+        float sunCosZenithAngle = dot(normalize(directional_light.direction), up);
+
+        float2 uv = float2(
+            clamp(0.5 + 0.5 * sunCosZenithAngle, 0.0, 1.0),
+            clamp((height - groundRadiusMM) / (atmosphereRadiusMM - groundRadiusMM), 0.0, 1.0)
+        );
+
+        return transmittance_lut.SampleLevel(transmittance_sampler, uv, 0).rgb;
+    }
+
     float get_linear_depth(float3 world_position)
     {
-        float4 clip = mul(camera.view_proj_matrix_no_jitter, float4(world_position, 1.0f));
-        return clip.z / clip.w;
+        float4 view = mul(camera.view_matrix, float4(world_position, 1.0f));
+        return -view.z;
     }
 
     HitInfo intersect(Ray ray)
