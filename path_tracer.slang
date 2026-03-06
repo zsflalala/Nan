@@ -52,7 +52,7 @@ void trace_path(inout Path path)
         path.L += path.thp * shading_data.emissive;
         
         // NEE: Sample directional light (sun) directly
-        float4 nee_result = g_scene.sample_directional_light(shading_data, path.rng.next_2d());
+        float4 nee_result = g_scene.sample_directional_light(shading_data, path.rng.next_2d(), path.pixel);
         path.L += path.thp * nee_result.xyz;
         
         // Continue path with BSDF sampling

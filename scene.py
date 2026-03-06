@@ -141,6 +141,10 @@ class Scene:
         self.pcss_light_size: float = 1.0 # PCSS light size
         self.pcf_sample_count: int = 16   # Number of PCF samples
         
+        # Poisson Disk PCF resources (set by renderer)
+        self.pcf_disk_samples_buffer = None
+        self.pcf_disk_sample_count: int = 0
+        
         # Start async location fetch
         # SunPosition.get_current_location_async(self._on_location_received)
         
@@ -687,6 +691,11 @@ class Scene:
         cursor["pcf_radius"] = self.pcf_radius
         cursor["pcss_light_size"] = self.pcss_light_size
         cursor["pcf_sample_count"] = self.pcf_sample_count
+        
+        # Poisson Disk PCF buffer
+        if self.pcf_disk_samples_buffer is not None:
+            cursor["pcf_disk_samples"] = self.pcf_disk_samples_buffer
+        cursor["pcf_disk_sample_count"] = self.pcf_disk_sample_count
 
         cursor["instance_count"] = len(self.instance_descs)
         cursor["frame_index"] = self._frame_index

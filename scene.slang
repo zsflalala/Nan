@@ -59,6 +59,10 @@ struct Scene {
     float pcf_radius;           // PCF filter radius in texels (default: 3.0)
     float pcss_light_size;      // PCSS light size for penumbra calculation (default: 1.0)
     uint pcf_sample_count;      // Number of PCF samples (default: 16)
+    
+    // Poisson Disk PCF resources (R2 quasi-random disk pattern)
+    StructuredBuffer<float2> pcf_disk_samples;
+    uint pcf_disk_sample_count;  // Number of samples in the disk pattern buffer
 
     DirectionalLight directional_light;
 
@@ -382,7 +386,7 @@ struct Scene {
     }
     
     // Visibility test using Shadow Map
-    float get_visibility_shadow_map(float3 world_pos)
+    float get_visibility_shadow_map(float3 world_pos, uint2 pixel = uint2(0, 0))
     {
         float4 clip_pos = mul(light_view_proj, float4(world_pos, 1.0));
         float3 ndc = clip_pos.xyz / clip_pos.w;
@@ -398,10 +402,10 @@ struct Scene {
             return get_shadow_hard(uv, current_depth, bias);
         } else if (shadow_filter_mode == 1) {
             // PCF
-            return get_shadow_pcf(uv, current_depth, bias, pcf_radius);
+            return get_shadow_pcf(uv, current_depth, bias, pcf_radius, pixel);
         } else {
             // PCSS
-            return get_shadow_pcss(uv, current_depth, bias);
+            return get_shadow_pcss(uv, current_depth, bias, pixel);
         }
     }
     
@@ -412,27 +416,31 @@ struct Scene {
         return (current_depth - bias < closest_depth) ? 1.0 : 0.0;
     }
     
-    // PCF (Percentage Closer Filtering) - fixed radius soft shadows
-    float get_shadow_pcf(float2 uv, float current_depth, float bias, float filter_radius)
+    // PCF (Percentage Closer Filtering) - using R2 quasi-random disk pattern with per-pixel rotation
+    float get_shadow_pcf(float2 uv, float current_depth, float bias, float filter_radius, uint2 pixel)
     {
         float texel_size = 1.0 / shadow_map_size;
         float shadow = 0.0;
         
-        // Poisson disk sampling pattern (16 samples)
-        static const float2 poisson_disk[16] = {
-            float2(-0.94201624, -0.39906216), float2(0.94558609, -0.76890725),
-            float2(-0.094184101, -0.92938870), float2(0.34495938, 0.29387760),
-            float2(-0.91588581, 0.45771432), float2(-0.81544232, -0.87912464),
-            float2(-0.38277543, 0.27676845), float2(0.97484398, 0.75648379),
-            float2(0.44323325, -0.97511554), float2(0.53742981, -0.47373420),
-            float2(-0.26496911, -0.41893023), float2(0.79197514, 0.19090188),
-            float2(-0.24188840, 0.99706507), float2(-0.81409955, 0.91437590),
-            float2(0.19984126, 0.78641367), float2(0.14383161, -0.14100790)
-        };
+        // Per-pixel random rotation angle for temporal convergence
+        // Each pixel gets a different rotation each frame; accumulator averages over time
+        RNG rotation_rng = RNG(pixel, frame_index);
+        float angle = rotation_rng.next_1d() * TWO_PI;
+        float cos_a = cos(angle);
+        float sin_a = sin(angle);
         
-        uint sample_count = min(pcf_sample_count, 16u);
+        // Random start index into the disk pattern buffer for variety
+        uint start_idx = rotation_rng.next() % pcf_disk_sample_count;
+        uint sample_count = min(pcf_sample_count, pcf_disk_sample_count);
+        
         for (uint i = 0; i < sample_count; i++) {
-            float2 offset = poisson_disk[i] * filter_radius * texel_size;
+            float2 disk_offset = pcf_disk_samples[(start_idx + i) % pcf_disk_sample_count];
+            // Apply 2D rotation matrix
+            float2 rotated = float2(
+                disk_offset.x * cos_a - disk_offset.y * sin_a,
+                disk_offset.x * sin_a + disk_offset.y * cos_a
+            );
+            float2 offset = rotated * filter_radius * texel_size;
             float depth = shadow_map.SampleLevel(linear_sampler, uv + offset, 0);
             shadow += (current_depth - bias < depth) ? 1.0 : 0.0;
         }
@@ -441,7 +449,7 @@ struct Scene {
     }
     
     // PCSS (Percentage Closer Soft Shadows) - directional lights
-    float get_shadow_pcss(float2 uv, float current_depth, float bias)
+    float get_shadow_pcss(float2 uv, float current_depth, float bias, uint2 pixel)
     {
         float texel_size = 1.0 / shadow_map_size;
         
@@ -451,22 +459,23 @@ struct Scene {
         float blocker_count = 0.0;
         
         // Search radius: for parallel lights, this is based on light angular size
-        // Typical sun angular diameter is ~0.53°, scaled to shadow map texels
-        float search_radius = pcss_light_size * 5.0; // Fixed search radius for parallel light
+        float search_radius = pcss_light_size * 5.0;
         
-        static const float2 poisson_disk[16] = {
-            float2(-0.94201624, -0.39906216), float2(0.94558609, -0.76890725),
-            float2(-0.094184101, -0.92938870), float2(0.34495938, 0.29387760),
-            float2(-0.91588581, 0.45771432), float2(-0.81544232, -0.87912464),
-            float2(-0.38277543, 0.27676845), float2(0.97484398, 0.75648379),
-            float2(0.44323325, -0.97511554), float2(0.53742981, -0.47373420),
-            float2(-0.26496911, -0.41893023), float2(0.79197514, 0.19090188),
-            float2(-0.24188840, 0.99706507), float2(-0.81409955, 0.91437590),
-            float2(0.19984126, 0.78641367), float2(0.14383161, -0.14100790)
-        };
+        // Per-pixel random rotation for blocker search (same approach as PCF)
+        RNG blocker_rng = RNG(pixel, frame_index + 0x12345); // Different seed offset from PCF
+        float b_angle = blocker_rng.next_1d() * TWO_PI;
+        float b_cos = cos(b_angle);
+        float b_sin = sin(b_angle);
+        uint b_start = blocker_rng.next() % pcf_disk_sample_count;
+        uint blocker_samples = min(16u, pcf_disk_sample_count);
         
-        for (uint i = 0; i < 16; i++) {
-            float2 offset = poisson_disk[i] * search_radius * texel_size;
+        for (uint i = 0; i < blocker_samples; i++) {
+            float2 disk_offset = pcf_disk_samples[(b_start + i) % pcf_disk_sample_count];
+            float2 rotated = float2(
+                disk_offset.x * b_cos - disk_offset.y * b_sin,
+                disk_offset.x * b_sin + disk_offset.y * b_cos
+            );
+            float2 offset = rotated * search_radius * texel_size;
             float depth = shadow_map.SampleLevel(linear_sampler, uv + offset, 0);
             if (depth < current_depth - bias) {
                 blocker_sum += depth;
@@ -480,15 +489,12 @@ struct Scene {
         float avg_blocker_depth = blocker_sum / blocker_count;
         
         // Step 2: Calculate penumbra width for directional light (orthographic projection)
-        // For parallel light rays, penumbra width is proportional to:
-        //   penumbra = light_angular_size * distance_to_blocker
-        // where distance = (receiver_depth - blocker_depth) * frustum_depth_range
         float depth_diff = current_depth - avg_blocker_depth;
-        float penumbra_width = pcss_light_size * depth_diff * 50.0; // Scale factor for visible effect
-        penumbra_width = clamp(penumbra_width, 1.0, 15.0); // Clamp to reasonable range
+        float penumbra_width = pcss_light_size * depth_diff * 50.0;
+        penumbra_width = clamp(penumbra_width, 1.0, 15.0);
         
         // Step 3: PCF with variable filter radius
-        return get_shadow_pcf(uv, current_depth, bias, penumbra_width);
+        return get_shadow_pcf(uv, current_depth, bias, penumbra_width, pixel);
     }
 
     // Sample sky with sun disk (atmospheric scattering + sun disk)
@@ -502,7 +508,7 @@ struct Scene {
     
     // Sample directional light with NEE (Next Event Estimation)
     // Returns: xyz = radiance contribution, w = pdf
-    float4 sample_directional_light(ShadingData sd, float2 rand_sample)
+    float4 sample_directional_light(ShadingData sd, float2 rand_sample, uint2 pixel = uint2(0, 0))
     {
         // Sample direction within sun disk cone
         float4 sample_result = sample_cone_direction(
@@ -516,7 +522,7 @@ struct Scene {
         // Visibility test - toggle between shadow map and ray tracing
         float visibility;
         if (use_shadow_map) {
-            visibility = get_visibility_shadow_map(sd.position);
+            visibility = get_visibility_shadow_map(sd.position, pixel);
         } else {
             Ray shadow_ray = Ray(sd.compute_new_ray_origin(), L_dir);
             visibility = get_visibility(shadow_ray);

@@ -8,6 +8,7 @@ from path_tracer import PathTracer
 from shadow_map import ShadowMapPass
 from render_data import RenderData
 from debug_visualizer import DebugVisualizer
+from low_discrepancy_disk_pattern import LowDiscrepancyDiskPattern
 
 class PathTracingRenderer:
     def initialize(self, device: spy.Device, scene: Scene):
@@ -21,6 +22,12 @@ class PathTracingRenderer:
         shadow_map_size = int(scene.shadow_map_size) if hasattr(scene, 'shadow_map_size') else 2048
         print(f"[PathTracingRenderer] Initializing ShadowMapPass with size: {shadow_map_size}")
         self.shadow_map_pass: ShadowMapPass = ShadowMapPass(device, shadow_map_size)
+        
+        # Initialize R2 quasi-random disk pattern for PCF temporal convergence
+        self.disk_pattern = LowDiscrepancyDiskPattern(device, sample_count=8192)
+        scene.pcf_disk_samples_buffer = self.disk_pattern.neighbor_offset_buffer
+        scene.pcf_disk_sample_count = self.disk_pattern.neighbor_offset_mask + 1
+        print(f"[PathTracingRenderer] Initialized disk pattern with {scene.pcf_disk_sample_count} samples")
         
         self.exposure_slider = None
 
